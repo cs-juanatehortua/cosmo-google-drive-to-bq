@@ -1,36 +1,63 @@
+## Architecture Overview
+
+This project creates a fully automated, configuration-driven ETL pipeline to transfer files from a Google Drive folder into a BigQuery table. It consists of two separate Cloud Functions:
+
+1.  **`drive_file_downloader`**: This function is triggered by a push notification from the Google Drive API when a file is added to a specified folder. It downloads the file and uploads it to a Google Cloud Storage (GCS) bucket.
+2.  **`process_csv_to_bigquery`**: This function is triggered when a new file is created in the GCS bucket. It reads the file, matches it against a set of configured parsers, and loads the transformed data into the corresponding BigQuery table.
+
 ## Configuration
 
-Create a `config.json` file in the root of the project. This file stores the configuration for the Cloud Function and the folders to be monitored.
+The entire pipeline is controlled by a single `config.json` file.
 
 ### Complete `config.json` Example
 
 ```json
 {
-    "function_url": "https://<YOUR_REGION>-<YOUR_PROJECT_ID>.cloudfunctions.net/<YOUR_FUNCTION_NAME>",
+    "function_url": "https://<YOUR_REGION>-<YOUR_PROJECT_ID>.cloudfunctions.net/drive_file_downloader",
     "key_file_path": "./credentials.json",
     "bucket_name": "<YOUR_GCS_BUCKET_NAME>",
     "lookback_minutes": 5,
     "folders_to_watch": {
-        "folder": {
+        "monefy": {
             "folder_id": "<GOOGLE_DRIVE_FOLDER_ID>",
             "resource_id": ""
+        }
+    },
+    "parsers": {
+        "monefy": {
+            "filename_pattern": "^monefy_export_.*\\.csv$",
+            "file_type": "csv",
+            "project_id": "james-gcp-project",
+            "dataset_id": "monefy",
+            "table_id": "transactions",
+            "write_disposition": "WRITE_TRUNCATE",
+            "csv_options": {
+                "delimiter": ",",
+                "date_format": "%d/%m/%Y"
+            },
+            "schema": [
+                {"name": "date", "type": "DATE", "source_column": "date"},
+                {"name": "account", "type": "STRING", "source_column": "account"},
+                {"name": "category", "type": "STRING", "source_column": "category"},
+                {"name": "amount", "type": "FLOAT", "source_column": "amount"},
+                {"name": "description", "type": "STRING", "source_column": "description"}
+            ]
         }
     }
 }
 ```
 
--   `function_url`: The trigger URL of your deployed Cloud Function.
--   `key_file_path`: The path to your service account credentials file.
--   `bucket_name`: The name of the Google Cloud Storage bucket where files will be uploaded.
--   `lookback_minutes`: How far back (in minutes) the function should look for new files upon being triggered.
--   `folders_to_watch`: An object containing the folders you want to monitor.
-    -   Each key (e.g., `monefy_exports`) is a unique identifier for your folder.
-    -   `folder_id`: The actual ID of the Google Drive folder.
-    -   `resource_id`: This will be populated automatically by the `setup_channel.py` script. The Cloud Function uses this ID to look up the correct `folder_id`.
+-   **`parsers`**: This section defines the rules for parsing different types of files.
+    -   **`filename_pattern`**: A regular expression used to match against the name of the file uploaded to GCS. This determines which parser logic to apply.
+    -   **`file_type`**: The type of the file (e.g., `csv`). This allows for extending the logic to other types like `json` in the future.
+    -   **`csv_options`**: A nested object for CSV-specific settings.
+        -   `delimiter`: The delimiter used in the CSV file.
+        -   `date_format`: The format of date strings in the source CSV.
+    -   **`schema`**: An array defining the mapping from the source file to the BigQuery table.
 
 ## Deployment Instructions
 
-Deploy the Cloud Function using the `gcloud` command-line tool.
+### 1. Deploy the `drive_file_downloader` Function
 
     gcloud functions deploy drive_file_downloader \
     --gen2 \
@@ -42,15 +69,21 @@ Deploy the Cloud Function using the `gcloud` command-line tool.
     --allow-unauthenticated \
     --service-account=my-service-account@my-project.iam.gserviceaccount.com
 
+### 2. Deploy the `process_csv_to_bigquery` Function
+
+    gcloud functions deploy process_csv_to_bigquery \
+    --gen2 \
+    --runtime python313 \
+    --region europe-west1 \
+    --source . \
+    --entry-point=process_csv_to_bigquery \
+    --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
+    --trigger-event-filters="bucket=<YOUR_GCS_BUCKET_NAME>" \
+    --trigger-location eu \
+    --service-account=my-service-account@my-project.iam.gserviceaccount.com
+
 ## Setting up the Notification Channel
 
-After deploying the function, you must set up a push notification channel for each folder you want to watch. This script tells Google Drive to notify your function when a change occurs in the specified folder.
+After deploying the `drive_file_downloader` function, run the `setup_channel.py` script for each folder you want to watch.
 
-Run the `setup_channel.py` script with the key of the folder from your `config.json` as an argument.
-
-    python setup_channel.py monefy_exports
-
-The script will then:
-1.  Call the Google Drive API to create a notification channel.
-2.  Receive a unique `resource_id` for that channel.
-3.  Automatically update your `config.json` file, filling in the `resource_id` for the corresponding folder.
+    python setup_channel.py monefy

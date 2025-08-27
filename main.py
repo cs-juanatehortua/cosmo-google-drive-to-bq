@@ -3,12 +3,14 @@ import functions_framework
 import logging
 import os
 import json
+import csv
+import re
 from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 from google.auth import default as get_credentials
-from google.cloud import storage
+from google.cloud import storage, bigquery
 import google.cloud.logging
 
 # --- Configuration ---
@@ -18,6 +20,7 @@ with open('config.json', 'r') as f:
 BUCKET_NAME = config['bucket_name']
 LOOKBACK_MINUTES = config['lookback_minutes']
 FOLDERS_TO_WATCH = config['folders_to_watch']
+PARSERS = config['parsers']
 # ---------------------
 
 # Create a reverse lookup for resource_id to folder_key
@@ -34,10 +37,12 @@ try:
     CREDENTIALS, _ = get_credentials(scopes=['https://www.googleapis.com/auth/drive.readonly'])
     DRIVE_SERVICE = build('drive', 'v3', credentials=CREDENTIALS)
     STORAGE_CLIENT = storage.Client()
+    BIGQUERY_CLIENT = bigquery.Client()
 except Exception as e:
     logging.error(f"Failed to initialize global clients: {e}")
     DRIVE_SERVICE = None
     STORAGE_CLIENT = None
+    BIGQUERY_CLIENT = None
 
 # MimeType mapping for Google Workspace files to their export formats
 EXPORT_MIMETYPES = {
@@ -156,3 +161,104 @@ def drive_file_downloader(request):
         return "Internal Server Error", 500
 
     return f"Processed {len(files_to_process)} file(s) successfully", 200
+
+@functions_framework.cloud_event
+def process_csv_to_bigquery(cloud_event):
+    """
+    A generic Cloud Function triggered by a Cloud Storage event.
+    It parses a file and loads it into a BigQuery table based on configuration.
+    """
+    if not STORAGE_CLIENT or not BIGQUERY_CLIENT:
+        logging.error("Clients are not initialized. Exiting function.")
+        return "Internal Server Error: Clients not initialized", 500
+
+    data = cloud_event.data
+    bucket_name = data["bucket"]
+    file_name = data["name"]
+
+    logging.info(f"Processing file '{file_name}' from bucket '{bucket_name}'.")
+
+    # Find the correct parser configuration by matching the filename pattern
+    parser_config = None
+    for parser in PARSERS.values():
+        if re.match(parser['filename_pattern'], file_name):
+            parser_config = parser
+            break
+    
+    if not parser_config:
+        logging.warning(f"No parser found for file '{file_name}'. Ignoring.")
+        return "No parser found", 200
+
+    project_id = parser_config['project_id']
+    dataset_id = parser_config['dataset_id']
+    table_id = parser_config['table_id']
+    table_ref = f"{project_id}.{dataset_id}.{table_id}"
+
+    try:
+        # Download the file from GCS
+        bucket = STORAGE_CLIENT.bucket(bucket_name)
+        blob = bucket.blob(file_name)
+        file_data = blob.download_as_text()
+
+        rows_to_insert = []
+        if parser_config['file_type'] == 'csv':
+            csv_options = parser_config.get('csv_options', {})
+            reader = csv.DictReader(io.StringIO(file_data), delimiter=csv_options.get('delimiter', ','))
+            
+            for row in reader:
+                new_row = {}
+                for col_schema in parser_config['schema']:
+                    source_col = col_schema['source_column']
+                    dest_col = col_schema['name']
+                    col_type = col_schema['type']
+                    
+                    raw_value = row[source_col]
+                    
+                    # --- Data Type Conversion ---
+                    if col_type == 'DATE':
+                        date_format = csv_options.get('date_format', '%Y-%m-%d')
+                        date_obj = datetime.strptime(raw_value, date_format)
+                        new_row[dest_col] = date_obj.strftime('%Y-%m-%d')
+                    elif col_type == 'FLOAT':
+                        new_row[dest_col] = float(raw_value.replace(',', ''))
+                    elif col_type == 'INTEGER':
+                        new_row[dest_col] = int(raw_value.replace(',', ''))
+                    else: # STRING, etc.
+                        new_row[dest_col] = raw_value.strip()
+                rows_to_insert.append(new_row)
+        else:
+            logging.error(f"Unsupported file type: {parser_config['file_type']}")
+            return "Unsupported file type", 400
+
+        if not rows_to_insert:
+            logging.info("No rows to insert.")
+            return "No data to load", 200
+
+        # Build BigQuery schema from config
+        bq_schema = [
+            bigquery.SchemaField(col['name'], col['type']) for col in parser_config['schema']
+        ]
+
+        # Load data into BigQuery
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=parser_config['write_disposition'],
+            schema=bq_schema,
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        )
+
+        logging.info(f"Loading {len(rows_to_insert)} rows into BigQuery table '{table_ref}'")
+        
+        load_job = BIGQUERY_CLIENT.load_table_from_json(
+            rows_to_insert,
+            table_ref,
+            job_config=job_config
+        )
+        load_job.result() # Wait for the job to complete
+
+        success_message = f"Successfully loaded {len(rows_to_insert)} rows into {table_ref}"
+        logging.info(success_message)
+        return success_message, 200
+
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        return "Internal Server Error", 500
