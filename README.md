@@ -80,7 +80,8 @@ The entire pipeline is controlled by a single `config.json` file.
     --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
     --trigger-event-filters="bucket=<YOUR_GCS_BUCKET_NAME>" \
     --trigger-location eu \
-    --service-account=my-service-account@my-project.iam.gserviceaccount.com
+    --service-account=my-service-account@my-project.iam.gserviceaccount.com \
+    --allow-unauthenticated
 
 ## Setting up the Notification Channel
 
