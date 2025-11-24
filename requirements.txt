@@ -8,3 +8,5 @@ google-cloud-logging
 google-cloud-bigquery
 pytest
 pytest-mock
+google-cloud-firestore
+google-cloud-secret-manager

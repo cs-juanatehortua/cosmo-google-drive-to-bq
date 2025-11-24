@@ -1,0 +1,51 @@
+{
+    "project_id": "james-gcp-project",
+    "secret_id": "drive-webhook-secret",
+    "lookback_minutes": 5,
+    "bucket_name": "jb-g-drive-to-bq",
+    "firestore_collection": "google_drive_channels",
+    "folder_ids": {
+        "monefy": "1bnhOMSVgO5akYeJjxZjVbg5cAK0Fsx8R"
+    },
+    "parsers": {
+        "monefy": {
+            "filename_pattern": "^Monefy.Data.*\\.csv$",
+            "file_type": "csv",
+            "project_id": "james-gcp-project",
+            "dataset_id": "personal_finance",
+            "table_id": "monefy",
+            "write_disposition": "WRITE_TRUNCATE",
+            "csv_options": {
+                "delimiter": ",",
+                "date_format": "%d/%m/%Y"
+            },
+            "schema": [
+                {
+                    "name": "date",
+                    "type": "DATE",
+                    "source_column": "date"
+                },
+                {
+                    "name": "account",
+                    "type": "STRING",
+                    "source_column": "account"
+                },
+                {
+                    "name": "category",
+                    "type": "STRING",
+                    "source_column": "category"
+                },
+                {
+                    "name": "amount",
+                    "type": "FLOAT",
+                    "source_column": "amount"
+                },
+                {
+                    "name": "description",
+                    "type": "STRING",
+                    "source_column": "description"
+                }
+            ]
+        }
+    }
+}
