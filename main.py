@@ -125,7 +125,7 @@ def drive_setup_watch(cloud_event):
     function_url_base = data.get('function_url_base') or os.environ.get('FUNCTION_URL_BASE')
 
     if not all([folder_id, function_url_base]):
-        error_msg = "'folder_id' not found in config or 'FUNCTION_URL_BASE' not found in env vars or message."
+        error_msg = f"folder_id [{folder_id}] not found in config or 'FUNCTION_URL_BASE' not found in env vars or message."
         logging.error(error_msg)
         return "Bad Request: Configuration incomplete", 400
 

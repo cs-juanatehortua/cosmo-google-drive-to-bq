@@ -110,8 +110,7 @@ This function receives notifications from Google Drive. Note the `--set-env-vars
         --entry-point=drive_file_downloader \
         --trigger-http \
         --allow-unauthenticated \
-        --service-account=google-drive@james-gcp-project.iam.gserviceaccount.com \
-        --set-env-vars FUNCTION_URL_BASE=https://europe-west1-james-gcp-project.cloudfunctions.net/drive_file_downloader
+        --service-account=google-drive@james-gcp-project.iam.gserviceaccount.com
 
 ### 2. Deploy the `drive_setup_watch` Function
 
@@ -126,7 +125,8 @@ This function is triggered by a Pub/Sub message to create or refresh a watch cha
         --trigger-topic=drive-setup-watch \
         --allow-unauthenticated \
         --ingress-settings=internal-only \
-        --service-account=google-drive@james-gcp-project.iam.gserviceaccount.com
+        --service-account=google-drive@james-gcp-project.iam.gserviceaccount.com \
+        --set-env-vars FUNCTION_URL_BASE=https://europe-west1-james-gcp-project.cloudfunctions.net/drive_file_downloader
 
 ### 3. Deploy the `drive_process_csv_to_bigquery` Function
 
