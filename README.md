@@ -1,5 +1,7 @@
 ## Architecture Overview
 
+Blog Entry: <a>https://www.jibbyjames.com/post/google-drive-to-bigquery/</a>
+
 This project creates a fully automated, configuration-driven ETL pipeline to transfer files from a Google Drive folder into a BigQuery table. The architecture is event-driven and built on three serverless Cloud Functions:
 
 1.  **`drive_setup_watch_pubsub`**: This function is triggered by a message on a Pub/Sub topic. Its job is to establish a secure communication channel between the Google Drive API and our application. It tells the Drive API to send a notification to a unique, secret-protected URL whenever a change occurs in a specified folder. The details of this channel are stored in Firestore for persistence.
